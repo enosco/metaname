@@ -35,7 +35,7 @@ Help()
 }
 
 #Loop through options
-while getopts ":h:rt" option; do
+while getopts ":hp:rt" option; do
 	case $option in
 		h) #Print help message
 			Help
@@ -123,16 +123,16 @@ for file in "$targetdir"/*; do
     #error checking if no artist or album name is found, or if no audio files were found
         #count to check if exiftool was run at least once?
 done
-
+	
 if (( $user_confirm == 1 )); then
-    
+	path=$(realpath $targetdir/..)
     if (( $rev_mode == 1 )); then
-    	newdir="$albumname - $artistname"
+    	newdir="$path/$albumname - $artistname"
     else 
-    	newdir="$artistname - $albumname"
+    	newdir="$path/$artistname - $albumname"
     fi
 
-    mv -nv "$targetdir" "$newdir"
+   	mv -nv "$targetdir" "$newdir"
 else
 	echo "unable to find additional audio files. metadata may be incorrect. exit"  
 fi
