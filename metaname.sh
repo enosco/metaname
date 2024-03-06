@@ -1,26 +1,17 @@
 #!/bin/bash
 
 #TODO:
-    #Handle .zip and other archive files
-        #Unzip -> analyze -> rename -> new zip -> cleanup
-    #Deal with strange input and output, like unicode characters, blank titles
-    #Also handle cases where no metadata is found in the firstplace
-    #Deal with excessively long lines
-    #implement reverse and test mode
     #make sure renaming follows the path of given directory
+    #Stop from nesting folders if folder already exists
+    #Handle case where .zip archive has multiple albums zipped inside
+    #Package renaming into a single function
 
-# This sets up error checking and basic help
-# NOTE: comment out 'pipefail' if you're expecting things to return
-#       nonzero, such as grep if something isn't found.
+
 set -o errexit   # stop script when an error occurs
-#set -o pipefail  # stop if a pipe fails
 set -o nounset   # stop if an unset variable is accessed
 #set -o xtrace
 
-rev_mode=0
-test_mode=0
-
-#Help Function
+#Print help message
 Help()
 {
 	printf "Metanamer takes an album folder/directory as input \n"
@@ -30,25 +21,132 @@ Help()
 
 	printf "SYNTAX: metanamer [-h] [DIRECTORY]\n"
 	printf "options:\n"
-	printf " -h\tPrint help message.\n\n"
+	printf " -h\tPrint help message.\n"
+	printf " -z\tRename .zip archives.\n\n"
 	
 }
 
+#Loop through audio files in targetdir to find appropriate metadata
+Rename_STD()
+{
+	for file in "$targetdir"/*; do
+	    
+	    filename=$(basename "$file")
+	
+		#Check file extension
+	    if [[ $filename =~ .*\.(wav|mp3|flac|ogg|aac|m4a)$ ]]; then
+	        printf "selected audio file: $filename\n"
+	
+	        artist_name=$(exiftool -b -Artist "$targetdir"/"$filename")
+	        album_name=$(exiftool -b -Album "$targetdir"/"$filename")
+
+	   	    user_confirm=0
+
+			echo
+	        read -n 1 -p "found artist and album name -- $album_name by $artist_name -- is this correct (y/n)? : " input
+	        echo
+	        
+	        if [[ "$input" == [Yy] ]]; then
+	            user_confirm=1
+	            break
+	        else
+	            printf "trying other audio files...\n\n"
+	            continue
+	        fi
+	            
+	    fi
+	    
+	done
+
+	if (( $user_confirm == 1 )); then
+		path=$(realpath "$targetdir"/..)
+	    if (( $rev_mode == 1 )); then
+	    	newdir="$path/$album_name - $artist_name"
+	    else 
+	    	newdir="$path/$artist_name - $album_name"
+	    fi
+	
+	   	mv -nv "$targetdir" "$newdir"
+	else
+		echo "unable to find additional audio files. exiting..."
+		echo  
+		exit 1
+	fi
+}
+
+#Extract individual songs from archive to grab metadata from
+Rename_ZIP()
+{	
+
+	path=$(realpath "$targetdir" | sed 's:\(.*/\).*:\1:' )					#Get path of target .zip
+	
+	file_list="${path}/metaname_temp.txt"									#Create file list of archive's contents in temp dir
+
+	unzip -Z1 "$targetdir" | grep $audio_formats > "$file_list"				#Fill file list			
+	
+	song_count=$(wc -l < "$file_list")
+	for	(( i=1 ; i <= $song_count ; i++ ))
+	do
+
+		current_song=$( sed -n "${i}p" "$file_list" )						
+		unzip -q "$targetdir" "$current_song" -d "." 						#Grab single song from list
+		
+		artist_name=$(exiftool -b -Artist "$current_song" )					#Attempt to pull metadata from song
+		album_name=$(exiftool -b -Album "$current_song" )
+		
+		rm "$current_song"													#Remove song
+		
+		user_confirm=0						
+        echo
+	    read -n 1 -p "found artist and album name -- $album_name by $artist_name -- is this correct (y/n)? : " input
+	    echo
+	    
+	    if [[ "$input" == [Yy] ]]; then
+	    	user_confirm=1
+	        break
+	    else
+	    	printf "trying other audio files...\n"
+			continue
+	    fi
+
+	done
+
+	if (( $user_confirm == 1 )); then
+	    if (( $rev_mode == 1 )); then
+	    	new_name="$path/$album_name - $artist_name"
+	    else 
+	    	new_name="$path/$artist_name - $album_name"
+	    fi
+	    
+        echo
+	   	mv -nv "$targetdir" "$new_name.zip"
+        echo
+	   	
+	else
+		echo "unable to find additional audio files. exiting..."
+		echo  		
+	fi
+
+	rm "$file_list"
+
+}
+
+#						=== MAIN ===
+
+audio_formats='.\(wav\|mp3\|flac\|ogg\|aac\|m4a\)'
+type="directory"
+zip_mode=0
+rev_mode=0
+
 #Loop through options
-while getopts ":hp:rt" option; do
+while getopts ":hzt" option; do
 	case $option in
 		h) #Print help message
 			Help
 			exit;;
-		r) #Change output to album - artist
-			rev_mode=1
-			;;
-		t) #Show output without changing names
-			echo "====        Operating in test mode        ===="
-			echo "====  Directory name will not be changed  ===="
-			echo
-			
-			test_mode=1
+		z) #Handle .zip archives
+			zip_mode=1
+			type=".zip archive"
 			;;
 		\?)
 			echo "illegal option -- Use -h for help"
@@ -58,83 +156,52 @@ done
 
 shift $((OPTIND-1))
 
+echo "selected: $1"
 #Check for no input
 if [[ $# -eq 0 ]]; then
     echo "Usage: metanamer [OPTIONS] [DIRECTORY] -- Use -h for more details"
+    echo
     exit 0
 fi
 
-#Check for non-directory input
-if [[ ! -d $1 ]]; then
-    echo "input is not a directory -- Use -h for help"
+#Check for invalid input | might want to find a way to streamline this check
+if [[ ! -d "$1" && $zip_mode == 0 ]] || [[ $zip_mode == 1 && "$1" != *\.zip ]]; then 
+
+  	echo "input is not a $type -- Use -h for help" 
+  	echo 
     exit 1
 else 
     targetdir=$1
 fi
 
-#Check if dir is empty
-if [[ -z "$( ls -A $targetdir )" ]]; then
-	echo "directory is empty -- Use -h for help"
+
+#Check for audio files within folder
+if [[ $zip_mode == 1 ]]; then
+	grep_exit_code=$( unzip -l "$targetdir" | grep -qs $audio_formats; echo $?)
+else
+	grep_exit_code=$( ls -A "$targetdir" | grep -qs $audio_formats; echo $?)
+fi
+
+
+#grep_exit_code=$( ls -A "$targetdir" | grep -qs '.\(wav\|mp3\|flac\|ogg\|aac\|m4a\)'; echo $?)
+
+if [[ $grep_exit_code == 1 ]]; then
+	echo "$type contains no audio files -- Use -h for help"
+	echo
 	exit 2
 fi
 
-#Check for potential invalid input -- no audio files
-grep_exit_code=$( ls -A $targetdir | grep -qs '.\(wav\|mp3\|flac\|ogg\|aac\|m4a\)'; echo $?)
+#If everything is correct, move onto the renaming
 
-if [[ $grep_exit_code == 1 ]]; then
-	echo "directory contains no audio files -- Use -h for help"
-	exit 3
+#printf "selected $type: $targetdir\n" 
+
+#user_confirm=0
+
+artist_name="NULL"
+album_name="NULL"
+
+if [[ $zip_mode == 1 ]]; then
+	Rename_ZIP
+else 
+	Rename_STD
 fi
-
-printf "selected directory: $targetdir\n" 
-
-user_confirm=0
-
-artistname="NULL"
-albumname="NULL"
-
-#Loop through audio files in targetdir to find appropriate metadata
-for file in "$targetdir"/*; do
-    
-    filename=$(basename "$file")
-
-	#Check file extension
-    if [[ $filename =~ .*\.(wav|mp3|flac|ogg|aac|m4a)$ ]]; then
-        printf "found audio file: $filename\n\n"
-
-        artistname=$(exiftool -b -Artist "$targetdir"/"$filename") # | sed 's,\(.*:\) \(.*\),\2,')
-        albumname=$(exiftool -b -Album "$targetdir"/"$filename") # | sed 's,\(.*:\) \(.*\),\2,')
-       
-        read -n 1 -p "found artist and album name -- $albumname by $artistname -- is this correct (y/n)? : " input
-        echo
-        
-        if [[ "$input" == [Yy] ]]; then
-            user_confirm=1
-            break
-        else
-            printf "\ntrying other audio files...\n\n"
-            continue
-        fi
-            
-        #figure out what to do if garbage response is given
-    fi
-    
-    
-    #error checking if no artist or album name is found, or if no audio files were found
-        #count to check if exiftool was run at least once?
-done
-	
-if (( $user_confirm == 1 )); then
-	path=$(realpath $targetdir/..)
-    if (( $rev_mode == 1 )); then
-    	newdir="$path/$albumname - $artistname"
-    else 
-    	newdir="$path/$artistname - $albumname"
-    fi
-
-   	mv -nv "$targetdir" "$newdir"
-else
-	echo "unable to find additional audio files. metadata may be incorrect. exit"  
-fi
-
-
