@@ -5,7 +5,15 @@
     #Stop from nesting folders if folder already exists
     #Handle case where .zip archive has multiple albums zipped inside
     #Package renaming into a single function
-
+    #Figure out bug in zip mode where it creates an empty folder of the selected album
+        #Test on yot club or any agaisnt me album, that seems to provoke it
+    #Another error with wecool.zip, something to do with folder with a folder? figure it out
+        #Freaks out with certain downloads that have osx metadata folders?
+        #mv: cannot move 'wecool.zip' to a subdirectory of itself, '/media/wizard/EVIL JAMS//Jeff Rosenstock - We Cool?.zip'
+            #Found error, cannot use '?' in a filename
+    #Aphex twin album leads to stop, what happens?
+        #Same with me like bees
+    #Found issue with hop along album, have to escape the brackets; how do i do that with input?
 
 set -o errexit   # stop script when an error occurs
 set -o nounset   # stop if an unset variable is accessed
@@ -80,7 +88,7 @@ Rename_ZIP()
 
 	path=$(realpath "$targetdir" | sed 's:\(.*/\).*:\1:' )					#Get path of target .zip
 	
-	file_list="${path}/metaname_temp.txt"									#Create file list of archive's contents in temp dir
+	file_list="${path}metaname_temp.txt"									#Create file list of archive's contents in temp dir
 
 	unzip -Z1 "$targetdir" | grep $audio_formats > "$file_list"				#Fill file list			
 	
@@ -88,7 +96,7 @@ Rename_ZIP()
 	for	(( i=1 ; i <= $song_count ; i++ ))
 	do
 
-		current_song=$( sed -n "${i}p" "$file_list" )						
+		current_song=$( sed -n "${i}p" "$file_list" )						#sed command prints the line at index
 		unzip -q "$targetdir" "$current_song" -d "." 						#Grab single song from list
 		
 		artist_name=$(exiftool -b -Artist "$current_song" )					#Attempt to pull metadata from song
@@ -115,7 +123,7 @@ Rename_ZIP()
 	    if (( $rev_mode == 1 )); then
 	    	new_name="$path/$album_name - $artist_name"
 	    else 
-	    	new_name="$path/$artist_name - $album_name"
+	    	new_name="$path/$artist_name - $album_name" #That forward slash creates some formatting weirdness, but it makes the code more readable
 	    fi
 	    
         echo
